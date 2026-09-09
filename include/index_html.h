@@ -1772,6 +1772,66 @@ const char index_html[] PROGMEM = R"rawliteral(
               </div>
             </section>
 
+            <section class="panel">
+              <div class="panel-header">
+                <h2>Now Playing (Last.fm)</h2>
+                <p class="panel-copy">Display currently playing music from Spotify, Apple Music, YouTube Music, etc. via Last.fm scrobbles.</p>
+              </div>
+
+              <div class="toggle-padding">
+                <label class="toggle-row-lg">
+                  <span class="label-text">Enable Music Display</span>
+                  <span class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="lastFmEnabled"
+                      name="lastFmEnabled"
+                      onchange="toggleLastfmFields(this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div id="lastFmFieldsContainer" style="margin-top: 1rem; display: none;">
+                <label for="lastFmUser">Last.fm Username</label>
+                <input
+                  type="text"
+                  id="lastFmUser"
+                  name="lastFmUser"
+                  placeholder="e.g. your_username"
+                  autocomplete="off"
+                />
+
+                <label for="lastFmApiKey">Last.fm API Key (Optional)</label>
+                <input
+                  type="text"
+                  id="lastFmApiKey"
+                  name="lastFmApiKey"
+                  placeholder="Default community key used if empty"
+                  autocomplete="off"
+                />
+                <div class="small">
+                  Leave blank to use default key, or
+                  <a href="https://www.last.fm/api/account/create" target="_blank">get your free key here</a>.
+                </div>
+
+                <div class="toggle-padding" style="margin-top: 0.75rem;">
+                  <label class="toggle-row-lg">
+                    <span class="label-text">Show Only When Playing</span>
+                    <span class="toggle-switch">
+                      <input
+                        type="checkbox"
+                        id="lastFmNowPlayingOnly"
+                        name="lastFmNowPlayingOnly"
+                      />
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </section>
+
             <section class="panel panel-collapsible">
               <button type="button" class="sub-collapsible" aria-expanded="false">
                 Display & Brightness
@@ -2138,6 +2198,21 @@ window.onload = function () {
               data.openWeatherCity || "";
             document.getElementById("openWeatherCountry").value =
               data.openWeatherCountry || "";
+
+            // --- Last.fm Settings ---
+            var lEn = document.getElementById("lastFmEnabled");
+            if (lEn) {
+              lEn.checked = (data.lastFmEnabled === true || data.lastFmEnabled === "true" || data.lastFmEnabled === 1 || data.lastFmEnabled === "1");
+              toggleLastfmFields(lEn.checked);
+            }
+            var lUser = document.getElementById("lastFmUser");
+            if (lUser) lUser.value = data.lastFmUser || "";
+            var lKey = document.getElementById("lastFmApiKey");
+            if (lKey) lKey.value = data.lastFmApiKey || "";
+            var lNp = document.getElementById("lastFmNowPlayingOnly");
+            if (lNp) {
+              lNp.checked = (data.lastFmNowPlayingOnly === true || data.lastFmNowPlayingOnly === "true" || data.lastFmNowPlayingOnly === 1 || data.lastFmNowPlayingOnly === "1" || data.lastFmNowPlayingOnly === undefined);
+            }
             document.getElementById("weatherUnits").checked =
               data.weatherUnits === "imperial";
             document.getElementById("clockDuration").value =
@@ -2426,6 +2501,24 @@ window.onload = function () {
         var pPwdSubmit = document.getElementById("proxyPass");
         if (pPwdSubmit) {
           formData.set("proxyPass", pPwdSubmit.value);
+        }
+
+        // --- Last.fm Settings ---
+        var lEnSubmit = document.getElementById("lastFmEnabled");
+        if (lEnSubmit) {
+          formData.set("lastFmEnabled", lEnSubmit.checked ? "true" : "false");
+        }
+        var lUserSubmit = document.getElementById("lastFmUser");
+        if (lUserSubmit) {
+          formData.set("lastFmUser", lUserSubmit.value.trim());
+        }
+        var lKeySubmit = document.getElementById("lastFmApiKey");
+        if (lKeySubmit) {
+          formData.set("lastFmApiKey", lKeySubmit.value.trim());
+        }
+        var lNpSubmit = document.getElementById("lastFmNowPlayingOnly");
+        if (lNpSubmit) {
+          formData.set("lastFmNowPlayingOnly", lNpSubmit.checked ? "true" : "false");
         }
 
         // --- Dimming ---
@@ -2889,6 +2982,13 @@ window.onload = function () {
 
       function toggleProxyFields(show) {
         var container = document.getElementById("proxyFieldsContainer");
+        if (container) {
+          container.style.display = show ? "block" : "none";
+        }
+      }
+
+      function toggleLastfmFields(show) {
+        var container = document.getElementById("lastFmFieldsContainer");
         if (container) {
           container.style.display = show ? "block" : "none";
         }

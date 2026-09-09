@@ -46,6 +46,8 @@ bool syncTimeViaHTTP();
 time_t parseHttpDate(const String &dateStr);
 void applySyncedTime(time_t epoch, const char *source);
 void updateProxyAuthHeader();
+void fetchLastFmTrack();
+bool isLastFmActive();
 void printConfigToSerial();
 void replaceIconTokens(String &msg, int &totalPixelWidth);
 void setupWebServer();
@@ -167,6 +169,19 @@ void updateProxyAuthHeader() {
     proxyAuthHeader = "";
   }
 }
+
+// Last.fm settings
+bool lastFmEnabled = false;
+char lastFmUser[64] = "";
+char lastFmApiKey[64] = "";
+bool lastFmNowPlayingOnly = true;
+String lastFmTrack = "";
+String lastFmArtist = "";
+bool lastFmNowPlaying = false;
+bool lastFmTrackAvailable = false;
+unsigned long lastLastFmFetchTime = 0;
+const unsigned long LASTFM_FETCH_INTERVAL = 25000UL;
+String lastFmDisplayString = "";
 
 // Dimming
 bool dimmingEnabled = false;
@@ -452,6 +467,11 @@ void loadConfig() {
   strlcpy(proxyUser, doc["proxyUser"] | "", sizeof(proxyUser));
   strlcpy(proxyPass, doc["proxyPass"] | "", sizeof(proxyPass));
   updateProxyAuthHeader();
+
+  lastFmEnabled = doc["lastFmEnabled"] | false;
+  strlcpy(lastFmUser, doc["lastFmUser"] | "", sizeof(lastFmUser));
+  strlcpy(lastFmApiKey, doc["lastFmApiKey"] | "", sizeof(lastFmApiKey));
+  lastFmNowPlayingOnly = doc["lastFmNowPlayingOnly"] | true;
 
   // --- Dimming settings ---
   if (doc["dimmingEnabled"].is<bool>()) {
@@ -994,6 +1014,15 @@ void printConfigToSerial() {
   Serial.print(F("Custom Message: "));
   Serial.println(customMessage);
 
+  Serial.print(F("Last.fm Enabled: "));
+  Serial.println(lastFmEnabled ? "Yes" : "No");
+  if (lastFmEnabled) {
+    Serial.print(F("Last.fm User: "));
+    Serial.println(lastFmUser);
+    Serial.print(F("Last.fm Show Only When Playing: "));
+    Serial.println(lastFmNowPlayingOnly ? "Yes" : "No");
+  }
+
   Serial.print(F("Total Runtime: "));
   if (getTotalRuntimeSeconds() > 0) {
     Serial.println(formatTotalRuntime());
@@ -1247,6 +1276,10 @@ void setupWebServer() {
     doc[F("proxyPort")] = proxyPort;
     doc[F("proxyUser")] = String(proxyUser);
     doc[F("proxyPass")] = String(proxyPass);
+    doc[F("lastFmEnabled")] = lastFmEnabled;
+    doc[F("lastFmUser")] = String(lastFmUser);
+    doc[F("lastFmApiKey")] = (strlen(lastFmApiKey) > 0) ? String(lastFmApiKey) : "";
+    doc[F("lastFmNowPlayingOnly")] = lastFmNowPlayingOnly;
 
     String response;
     serializeJson(doc, response);
@@ -1302,6 +1335,10 @@ void setupWebServer() {
       else if (n == "proxyServer") doc[n] = v;
       else if (n == "proxyUser") doc[n] = v;
       else if (n == "proxyPass") doc[n] = v;
+      else if (n == "lastFmEnabled") doc[n] = (v == "true" || v == "on" || v == "1");
+      else if (n == "lastFmUser") doc[n] = v;
+      else if (n == "lastFmApiKey") doc[n] = v;
+      else if (n == "lastFmNowPlayingOnly") doc[n] = (v == "true" || v == "on" || v == "1");
       else if (n == "password") {
         if (v != "********") {
           doc[n] = v;  // allows empty password for open networks
@@ -2239,6 +2276,16 @@ void setupWebServer() {
     config["proxyUser"] = String(proxyUser);
     config["proxyPass"] = (strlen(proxyPass) > 0) ? "***HIDDEN***" : "";
 
+    // --- Last.fm ---
+    JsonObject lfm = doc.createNestedObject("lastfm");
+    lfm["enabled"] = lastFmEnabled;
+    lfm["user"] = String(lastFmUser);
+    lfm["nowPlayingOnly"] = lastFmNowPlayingOnly;
+    lfm["track"] = lastFmTrack;
+    lfm["artist"] = lastFmArtist;
+    lfm["nowPlaying"] = lastFmNowPlaying;
+    lfm["active"] = (displayMode == 8);
+
     // --- Dimming ---
     JsonObject dimming = doc.createNestedObject("dimming");
     dimming["dimmingEnabled"] = dimmingEnabled;
@@ -3081,6 +3128,115 @@ void fetchWeather() {
   }
 }
 
+// -----------------------------
+// Last.fm Helper & Fetch Functions
+// -----------------------------
+bool isLastFmActive() {
+  if (!lastFmEnabled) return false;
+  if (strlen(lastFmUser) == 0) return false;
+  if (!lastFmTrackAvailable) return false;
+  if (lastFmDisplayString.length() == 0) return false;
+  if (lastFmNowPlayingOnly && !lastFmNowPlaying) return false;
+  return true;
+}
+
+void fetchLastFmTrack() {
+  if (!lastFmEnabled || strlen(lastFmUser) == 0) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (isNetworkBusy) return;
+
+  isNetworkBusy = true;
+  lastLastFmFetchTime = millis();
+
+  const char *apiKey = (strlen(lastFmApiKey) > 0) ? lastFmApiKey : "b25b959554ed76058ac220b7b2e0a026";
+  String url = "http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user=" + String(lastFmUser) + "&api_key=" + String(apiKey) + "&format=json&limit=1";
+
+  Serial.print(F("[LASTFM] URL: "));
+  Serial.println(url);
+
+  HTTPClient http;
+  WiFiClient plainClient;
+
+  if (proxyEnabled && strlen(proxyServer) > 0) {
+    plainClient.stop();
+    yield();
+    Serial.printf("[LASTFM] Connecting via HTTP proxy %s:%d...\n", proxyServer, proxyPort);
+    http.begin(plainClient, proxyServer, proxyPort, url, false);
+    http.addHeader("Host", "ws.audioscrobbler.com");
+    if (proxyAuthHeader.length() > 0) {
+      http.addHeader("Proxy-Authorization", proxyAuthHeader);
+    }
+    http.setTimeout(8000);
+  } else {
+    plainClient.stop();
+    yield();
+    http.begin(plainClient, url);
+    http.setTimeout(8000);
+  }
+
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    http.end();
+    yield();
+
+    DynamicJsonDocument doc(2048);
+    DeserializationError error = deserializeJson(doc, payload);
+    if (!error) {
+      JsonObject trackObj;
+      if (doc["recenttracks"]["track"].is<JsonArray>()) {
+        if (doc["recenttracks"]["track"].size() > 0) {
+          trackObj = doc["recenttracks"]["track"][0];
+        }
+      } else if (doc["recenttracks"]["track"].is<JsonObject>()) {
+        trackObj = doc["recenttracks"]["track"];
+      }
+
+      if (!trackObj.isNull()) {
+        const char *artistRaw = "";
+        if (trackObj["artist"].is<JsonObject>()) {
+          artistRaw = trackObj["artist"]["#text"] | trackObj["artist"]["name"] | "";
+        } else if (trackObj["artist"].is<const char *>()) {
+          artistRaw = trackObj["artist"].as<const char *>();
+        }
+        const char *trackRaw = trackObj["name"] | "";
+
+        bool isNowPlaying = false;
+        if (trackObj.containsKey("@attr") && trackObj["@attr"].is<JsonObject>()) {
+          const char *np = trackObj["@attr"]["nowplaying"] | "";
+          isNowPlaying = (strcmp(np, "true") == 0);
+        }
+
+        if (strlen(trackRaw) > 0) {
+          lastFmArtist = cleanTextForDisplay(artistRaw);
+          lastFmTrack = cleanTextForDisplay(trackRaw);
+          lastFmNowPlaying = isNowPlaying;
+          lastFmTrackAvailable = true;
+
+          if (lastFmArtist.length() > 0) {
+            lastFmDisplayString = String("\x0D ") + lastFmArtist + " - " + lastFmTrack;
+          } else {
+            lastFmDisplayString = String("\x0D ") + lastFmTrack;
+          }
+
+          Serial.printf("[LASTFM] Track: %s | Artist: %s | NowPlaying: %s\n",
+                        lastFmTrack.c_str(), lastFmArtist.c_str(), lastFmNowPlaying ? "YES" : "NO");
+        }
+      } else {
+        Serial.println(F("[LASTFM] No tracks found in recenttracks"));
+      }
+    } else {
+      Serial.print(F("[LASTFM] JSON parse error: "));
+      Serial.println(error.f_str());
+    }
+  } else {
+    Serial.printf("[LASTFM] HTTP GET failed: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
+    http.end();
+  }
+
+  isNetworkBusy = false;
+}
+
 
 // -----------------------------
 // Load uptime from LittleFS
@@ -3496,6 +3652,9 @@ void advanceDisplayMode() {
     } else if (nightscoutConfigured) {
       displayMode = 4;  // Clock -> Nightscout (if weather & countdown are skipped)
       Serial.println(F("[DISPLAY] Switching to display mode: NIGHTSCOUT (from Clock, weather & countdown skipped)"));
+    } else if (isLastFmActive()) {
+      displayMode = 8;
+      Serial.println(F("[DISPLAY] Switching to display mode: LASTFM (from Clock)"));
     } else {
       displayMode = 0;
       Serial.println(F("[DISPLAY] Staying in CLOCK (from Clock)"));
@@ -3510,6 +3669,9 @@ void advanceDisplayMode() {
     } else if (nightscoutConfigured) {
       displayMode = 4;
       Serial.println(F("[DISPLAY] Switching to display mode: NIGHTSCOUT (from Date, weather & countdown skipped)"));
+    } else if (isLastFmActive()) {
+      displayMode = 8;
+      Serial.println(F("[DISPLAY] Switching to display mode: LASTFM (from Date)"));
     } else {
       displayMode = 0;
       Serial.println(F("[DISPLAY] Switching to display mode: CLOCK (from Date)"));
@@ -3524,6 +3686,9 @@ void advanceDisplayMode() {
     } else if (nightscoutConfigured) {
       displayMode = 4;  // Weather -> Nightscout (if description & countdown are skipped)
       Serial.println(F("[DISPLAY] Switching to display mode: NIGHTSCOUT (from Weather, description & countdown skipped)"));
+    } else if (isLastFmActive()) {
+      displayMode = 8;
+      Serial.println(F("[DISPLAY] Switching to display mode: LASTFM (from Weather)"));
     } else {
       displayMode = 0;
       Serial.println(F("[DISPLAY] Switching to display mode: CLOCK (from Weather)"));
@@ -3535,21 +3700,43 @@ void advanceDisplayMode() {
     } else if (nightscoutConfigured) {
       displayMode = 4;  // Description -> Nightscout (if countdown is skipped)
       Serial.println(F("[DISPLAY] Switching to display mode: NIGHTSCOUT (from Description, countdown skipped)"));
+    } else if (isLastFmActive()) {
+      displayMode = 8;
+      Serial.println(F("[DISPLAY] Switching to display mode: LASTFM (from Description)"));
     } else {
       displayMode = 0;
       Serial.println(F("[DISPLAY] Switching to display mode: CLOCK (from Description)"));
     }
-  } else if (displayMode == 3) {  // Countdown -> Nightscout
+  } else if (displayMode == 3) {  // Countdown -> Nightscout or Last.fm
     if (nightscoutConfigured) {
       displayMode = 4;
       Serial.println(F("[DISPLAY] Switching to display mode: NIGHTSCOUT (from Countdown)"));
+    } else if (isLastFmActive()) {
+      displayMode = 8;
+      Serial.println(F("[DISPLAY] Switching to display mode: LASTFM (from Countdown)"));
     } else {
       displayMode = 0;
       Serial.println(F("[DISPLAY] Switching to display mode: CLOCK (from Countdown)"));
     }
-  } else if (displayMode == 4) {  // Nightscout -> Custom Message
-    displayMode = 6;
-    Serial.println(F("[DISPLAY] Switching to display mode: CUSTOM MESSAGE (from Nightscout)"));
+  } else if (displayMode == 4) {  // Nightscout -> Last.fm or Custom Message
+    if (isLastFmActive()) {
+      displayMode = 8;
+      Serial.println(F("[DISPLAY] Switching to display mode: LASTFM (from Nightscout)"));
+    } else if (strlen(customMessage) > 0) {
+      displayMode = 6;
+      Serial.println(F("[DISPLAY] Switching to display mode: CUSTOM MESSAGE (from Nightscout)"));
+    } else {
+      displayMode = 0;
+      Serial.println(F("[DISPLAY] Switching to display mode: CLOCK (from Nightscout)"));
+    }
+  } else if (displayMode == 8) {  // Last.fm -> Custom Message or Clock
+    if (strlen(customMessage) > 0) {
+      displayMode = 6;
+      Serial.println(F("[DISPLAY] Switching to display mode: CUSTOM MESSAGE (from Last.fm)"));
+    } else {
+      displayMode = 0;
+      Serial.println(F("[DISPLAY] Switching to display mode: CLOCK (from Last.fm)"));
+    }
   } else if (displayMode == 6) {  // Custom Message
     // If Timer is active, return to Mode 7, NOT Mode 0
     if (timerActive) {
@@ -3573,7 +3760,7 @@ void advanceDisplayMode() {
 
 void advanceDisplayModeSafe() {
   int attempts = 0;
-  const int MAX_ATTEMPTS = 7;  // Number of possible modes + 1
+  const int MAX_ATTEMPTS = 9;  // Number of possible modes + 1
   int startMode = displayMode;
   bool valid = false;
   do {
@@ -3590,6 +3777,7 @@ void advanceDisplayModeSafe() {
     else if (displayMode == 2 && showWeatherDescription && weatherAvailable && weatherDescription.length() > 0) valid = true;
     else if (displayMode == 3 && countdownEnabled && !countdownFinished && ntpSyncSuccessful) valid = true;
     else if (displayMode == 4 && nightscoutConfigured) valid = true;
+    else if (displayMode == 8 && isLastFmActive()) valid = true;
     else if (displayMode == 6 && strlen(customMessage) > 0) valid = true;
 
     // If we've looped back to where we started, break to avoid infinite loop
@@ -4029,6 +4217,13 @@ void loop() {
     shouldFetchWeatherNow = false;
   }
 
+  // --- LAST.FM FETCHING LOGIC ---
+  if (WiFi.status() == WL_CONNECTED && lastFmEnabled && strlen(lastFmUser) > 0) {
+    if (!lastFmTrackAvailable || (millis() - lastLastFmFetchTime >= LASTFM_FETCH_INTERVAL)) {
+      fetchLastFmTrack();
+    }
+  }
+
   const char *const *daysOfTheWeek = getDaysOfWeek(language);
   // Call our new formatting function
   String daySymbol = getFormattedDateText(daysOfTheWeek[timeinfo.tm_wday]);
@@ -4149,7 +4344,7 @@ void loop() {
 
       // --- SCROLL IN ONLY WHEN COMING FROM SPECIFIC MODES OR FIRST BOOT ---
       bool shouldScrollIn = false;
-      if (prevDisplayMode == -1 || prevDisplayMode == 3 || prevDisplayMode == 4) {
+      if (prevDisplayMode == -1 || prevDisplayMode == 3 || prevDisplayMode == 4 || prevDisplayMode == 8) {
         shouldScrollIn = true;  // first boot or other special modes
       } else if (prevDisplayMode == 2 && weatherDescription.length() > 8) {
         shouldScrollIn = true;  // only scroll in if weather was scrolling
@@ -4949,6 +5144,41 @@ void loop() {
       prevDisplayMode = 6;
       advanceDisplayMode();
     }
+    yield();
+    return;
+  }
+
+  // --- Last.fm Display Mode (displayMode == 8) ---
+  if (displayMode == 8) {
+    if (forceMessageRestart) return;
+
+    if (!isLastFmActive()) {
+      advanceDisplayMode();
+      yield();
+      return;
+    }
+
+    String msg = lastFmDisplayString;
+    bool addPadding = false;
+    bool humidityVisible = showHumidity && weatherAvailable && strlen(openWeatherApiKey) == 32 && strlen(openWeatherCity) > 0 && strlen(openWeatherCountry) > 0;
+    if (prevDisplayMode == 0 && (showDayOfWeek || colonBlinkEnabled)) addPadding = true;
+    else if (prevDisplayMode == 1 && humidityVisible) addPadding = true;
+
+    if (addPadding) msg = "    " + msg;
+
+    P.setTextAlignment(PA_LEFT);
+    P.setCharSpacing(1);
+    textEffect_t actualScrollDirection = getEffectiveScrollDirection(PA_SCROLL_LEFT, flipDisplay);
+
+    P.displayScroll(msg.c_str(), PA_LEFT, actualScrollDirection, GENERAL_SCROLL_SPEED);
+
+    while (!P.displayAnimate()) {
+      if (forceMessageRestart) return;
+      yield();
+    }
+
+    prevDisplayMode = 8;
+    advanceDisplayMode();
     yield();
     return;
   }
