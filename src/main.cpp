@@ -180,7 +180,7 @@ String lastFmArtist = "";
 bool lastFmNowPlaying = false;
 bool lastFmTrackAvailable = false;
 unsigned long lastLastFmFetchTime = 0;
-const unsigned long LASTFM_FETCH_INTERVAL = 25000UL;
+const unsigned long LASTFM_FETCH_INTERVAL = 30000UL;
 String lastFmDisplayString = "";
 
 // Dimming
@@ -3186,16 +3186,18 @@ void fetchLastFmTrack() {
       http.end();
       yield();
 
-      DynamicJsonDocument doc(2048);
+      DynamicJsonDocument doc(4096);
       DeserializationError error = deserializeJson(doc, payload);
       if (!error) {
         JsonObject trackObj;
-        if (doc["recenttracks"]["track"].is<JsonArray>()) {
-          if (doc["recenttracks"]["track"].size() > 0) {
-            trackObj = doc["recenttracks"]["track"][0];
+        JsonVariant trackVar = doc["recenttracks"]["track"];
+        if (trackVar.is<JsonArray>()) {
+          JsonArray arr = trackVar.as<JsonArray>();
+          if (arr.size() > 0) {
+            trackObj = arr[0].as<JsonObject>();
           }
-        } else if (doc["recenttracks"]["track"].is<JsonObject>()) {
-          trackObj = doc["recenttracks"]["track"];
+        } else if (trackVar.is<JsonObject>()) {
+          trackObj = trackVar.as<JsonObject>();
         }
 
         if (!trackObj.isNull()) {
@@ -4243,7 +4245,7 @@ void loop() {
 
   // --- LAST.FM FETCHING LOGIC ---
   if (WiFi.status() == WL_CONNECTED && lastFmEnabled && strlen(lastFmUser) > 0) {
-    if (!lastFmTrackAvailable || (millis() - lastLastFmFetchTime >= LASTFM_FETCH_INTERVAL)) {
+    if (lastLastFmFetchTime == 0 || (millis() - lastLastFmFetchTime >= LASTFM_FETCH_INTERVAL)) {
       fetchLastFmTrack();
     }
   }
