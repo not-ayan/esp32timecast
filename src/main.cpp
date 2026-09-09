@@ -3222,9 +3222,9 @@ void fetchLastFmTrack() {
             lastFmTrackAvailable = true;
 
             if (lastFmArtist.length() > 0) {
-              lastFmDisplayString = String("\x0D ") + lastFmArtist + " - " + lastFmTrack;
+              lastFmDisplayString = String("\x1E ") + lastFmArtist + " - " + lastFmTrack;
             } else {
-              lastFmDisplayString = String("\x0D ") + lastFmTrack;
+              lastFmDisplayString = String("\x1E ") + lastFmTrack;
             }
 
             Serial.printf("[LASTFM] Track: %s | Artist: %s | NowPlaying: %s\n",
