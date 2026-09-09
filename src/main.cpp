@@ -182,6 +182,10 @@ bool lastFmTrackAvailable = false;
 unsigned long lastLastFmFetchTime = 0;
 const unsigned long LASTFM_FETCH_INTERVAL = 30000UL;
 String lastFmDisplayString = "";
+String lastFmPreviousTrackKey = "";
+bool lastFmPreviousNowPlaying = false;
+unsigned long lastFmTrackDetectedTime = 0;
+const unsigned long LASTFM_DISPLAY_WINDOW = 30000UL;  // Only show for 30s after new track begins
 
 // Dimming
 bool dimmingEnabled = false;
@@ -3137,6 +3141,7 @@ bool isLastFmActive() {
   if (!lastFmTrackAvailable) return false;
   if (lastFmDisplayString.length() == 0) return false;
   if (lastFmNowPlayingOnly && !lastFmNowPlaying) return false;
+  if (lastFmTrackDetectedTime == 0 || (millis() - lastFmTrackDetectedTime > LASTFM_DISPLAY_WINDOW)) return false;
   return true;
 }
 
@@ -3216,8 +3221,22 @@ void fetchLastFmTrack() {
           }
 
           if (strlen(trackRaw) > 0) {
-            lastFmArtist = cleanTextForDisplay(artistRaw);
-            lastFmTrack = cleanTextForDisplay(trackRaw);
+            String newArtist = cleanTextForDisplay(artistRaw);
+            String newTrack = cleanTextForDisplay(trackRaw);
+            String currentTrackKey = newArtist + " - " + newTrack;
+
+            bool trackChanged = (currentTrackKey != lastFmPreviousTrackKey);
+            bool resumedPlaying = (!lastFmPreviousNowPlaying && isNowPlaying);
+
+            if (trackChanged || resumedPlaying) {
+              lastFmPreviousTrackKey = currentTrackKey;
+              lastFmTrackDetectedTime = millis();
+              Serial.println(F("[LASTFM] New track or resumed playback: Starting 30s display window"));
+            }
+            lastFmPreviousNowPlaying = isNowPlaying;
+
+            lastFmArtist = newArtist;
+            lastFmTrack = newTrack;
             lastFmNowPlaying = isNowPlaying;
             lastFmTrackAvailable = true;
 
@@ -3227,8 +3246,9 @@ void fetchLastFmTrack() {
               lastFmDisplayString = String("\x1E ") + lastFmTrack;
             }
 
-            Serial.printf("[LASTFM] Track: %s | Artist: %s | NowPlaying: %s\n",
-                          lastFmTrack.c_str(), lastFmArtist.c_str(), lastFmNowPlaying ? "YES" : "NO");
+            Serial.printf("[LASTFM] Track: %s | Artist: %s | NowPlaying: %s | WindowActive: %s\n",
+                          lastFmTrack.c_str(), lastFmArtist.c_str(), lastFmNowPlaying ? "YES" : "NO",
+                          isLastFmActive() ? "YES" : "NO");
           }
         } else {
           Serial.println(F("[LASTFM] No tracks found in recenttracks"));
