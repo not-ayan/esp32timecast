@@ -3148,90 +3148,114 @@ void fetchLastFmTrack() {
   isNetworkBusy = true;
   lastLastFmFetchTime = millis();
 
-  const char *apiKey = (strlen(lastFmApiKey) > 0) ? lastFmApiKey : "b25b959554ed76058ac220b7b2e0a026";
-  String url = "http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user=" + String(lastFmUser) + "&api_key=" + String(apiKey) + "&format=json&limit=1";
+  const char *defaultKey = "b25b959554ed76058ac220b7b2e0a026";
+  const char *apiKey = (strlen(lastFmApiKey) > 0) ? lastFmApiKey : defaultKey;
+  bool usedFallback = false;
 
-  Serial.print(F("[LASTFM] URL: "));
-  Serial.println(url);
+  while (true) {
+    String url = "http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user=" + String(lastFmUser) + "&api_key=" + String(apiKey) + "&format=json&limit=1";
 
-  HTTPClient http;
-  WiFiClient plainClient;
+    Serial.print(F("[LASTFM] URL: "));
+    Serial.println(url);
 
-  if (proxyEnabled && strlen(proxyServer) > 0) {
-    plainClient.stop();
-    yield();
-    Serial.printf("[LASTFM] Connecting via HTTP proxy %s:%d...\n", proxyServer, proxyPort);
-    http.begin(plainClient, proxyServer, proxyPort, url, false);
-    http.addHeader("Host", "ws.audioscrobbler.com");
-    if (proxyAuthHeader.length() > 0) {
-      http.addHeader("Proxy-Authorization", proxyAuthHeader);
-    }
-    http.setTimeout(8000);
-  } else {
-    plainClient.stop();
-    yield();
-    http.begin(plainClient, url);
-    http.setTimeout(8000);
-  }
+    HTTPClient http;
+    WiFiClient plainClient;
 
-  int httpCode = http.GET();
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
-    http.end();
-    yield();
-
-    DynamicJsonDocument doc(2048);
-    DeserializationError error = deserializeJson(doc, payload);
-    if (!error) {
-      JsonObject trackObj;
-      if (doc["recenttracks"]["track"].is<JsonArray>()) {
-        if (doc["recenttracks"]["track"].size() > 0) {
-          trackObj = doc["recenttracks"]["track"][0];
-        }
-      } else if (doc["recenttracks"]["track"].is<JsonObject>()) {
-        trackObj = doc["recenttracks"]["track"];
+    if (proxyEnabled && strlen(proxyServer) > 0) {
+      plainClient.stop();
+      yield();
+      Serial.printf("[LASTFM] Connecting via HTTP proxy %s:%d...\n", proxyServer, proxyPort);
+      http.begin(plainClient, proxyServer, proxyPort, url, false);
+      http.addHeader("Host", "ws.audioscrobbler.com");
+      http.addHeader("User-Agent", "ESPTimeCast/1.0");
+      if (proxyAuthHeader.length() > 0) {
+        http.addHeader("Proxy-Authorization", proxyAuthHeader);
       }
+      http.setTimeout(8000);
+    } else {
+      plainClient.stop();
+      yield();
+      http.begin(plainClient, url);
+      http.addHeader("User-Agent", "ESPTimeCast/1.0");
+      http.setTimeout(8000);
+    }
 
-      if (!trackObj.isNull()) {
-        const char *artistRaw = "";
-        if (trackObj["artist"].is<JsonObject>()) {
-          artistRaw = trackObj["artist"]["#text"] | trackObj["artist"]["name"] | "";
-        } else if (trackObj["artist"].is<const char *>()) {
-          artistRaw = trackObj["artist"].as<const char *>();
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = http.getString();
+      http.end();
+      yield();
+
+      DynamicJsonDocument doc(2048);
+      DeserializationError error = deserializeJson(doc, payload);
+      if (!error) {
+        JsonObject trackObj;
+        if (doc["recenttracks"]["track"].is<JsonArray>()) {
+          if (doc["recenttracks"]["track"].size() > 0) {
+            trackObj = doc["recenttracks"]["track"][0];
+          }
+        } else if (doc["recenttracks"]["track"].is<JsonObject>()) {
+          trackObj = doc["recenttracks"]["track"];
         }
-        const char *trackRaw = trackObj["name"] | "";
 
-        bool isNowPlaying = false;
-        if (trackObj.containsKey("@attr") && trackObj["@attr"].is<JsonObject>()) {
-          const char *np = trackObj["@attr"]["nowplaying"] | "";
-          isNowPlaying = (strcmp(np, "true") == 0);
-        }
+        if (!trackObj.isNull()) {
+          const char *artistRaw = "";
+          if (trackObj["artist"].is<JsonObject>()) {
+            artistRaw = trackObj["artist"]["#text"] | trackObj["artist"]["name"] | "";
+          } else if (trackObj["artist"].is<const char *>()) {
+            artistRaw = trackObj["artist"].as<const char *>();
+          }
+          const char *trackRaw = trackObj["name"] | "";
 
-        if (strlen(trackRaw) > 0) {
-          lastFmArtist = cleanTextForDisplay(artistRaw);
-          lastFmTrack = cleanTextForDisplay(trackRaw);
-          lastFmNowPlaying = isNowPlaying;
-          lastFmTrackAvailable = true;
-
-          if (lastFmArtist.length() > 0) {
-            lastFmDisplayString = String("\x0D ") + lastFmArtist + " - " + lastFmTrack;
-          } else {
-            lastFmDisplayString = String("\x0D ") + lastFmTrack;
+          bool isNowPlaying = false;
+          if (trackObj.containsKey("@attr") && trackObj["@attr"].is<JsonObject>()) {
+            const char *np = trackObj["@attr"]["nowplaying"] | "";
+            isNowPlaying = (strcmp(np, "true") == 0);
           }
 
-          Serial.printf("[LASTFM] Track: %s | Artist: %s | NowPlaying: %s\n",
-                        lastFmTrack.c_str(), lastFmArtist.c_str(), lastFmNowPlaying ? "YES" : "NO");
+          if (strlen(trackRaw) > 0) {
+            lastFmArtist = cleanTextForDisplay(artistRaw);
+            lastFmTrack = cleanTextForDisplay(trackRaw);
+            lastFmNowPlaying = isNowPlaying;
+            lastFmTrackAvailable = true;
+
+            if (lastFmArtist.length() > 0) {
+              lastFmDisplayString = String("\x0D ") + lastFmArtist + " - " + lastFmTrack;
+            } else {
+              lastFmDisplayString = String("\x0D ") + lastFmTrack;
+            }
+
+            Serial.printf("[LASTFM] Track: %s | Artist: %s | NowPlaying: %s\n",
+                          lastFmTrack.c_str(), lastFmArtist.c_str(), lastFmNowPlaying ? "YES" : "NO");
+          }
+        } else {
+          Serial.println(F("[LASTFM] No tracks found in recenttracks"));
         }
       } else {
-        Serial.println(F("[LASTFM] No tracks found in recenttracks"));
+        Serial.print(F("[LASTFM] JSON parse error: "));
+        Serial.println(error.f_str());
       }
+      break;
     } else {
-      Serial.print(F("[LASTFM] JSON parse error: "));
-      Serial.println(error.f_str());
+      String errPayload = "";
+      if (httpCode > 0) {
+        errPayload = http.getString();
+      }
+      Serial.printf("[LASTFM] HTTP GET failed: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
+      if (errPayload.length() > 0) {
+        Serial.printf("[LASTFM] Response: %s\n", errPayload.c_str());
+      }
+      http.end();
+
+      // If custom API key failed with 403 / Invalid key, automatically retry with fallback default key
+      if (!usedFallback && strcmp(apiKey, defaultKey) != 0 && httpCode == 403) {
+        Serial.println(F("[LASTFM] Custom API key rejected (403). Retrying with default fallback key..."));
+        apiKey = defaultKey;
+        usedFallback = true;
+        continue;
+      }
+      break;
     }
-  } else {
-    Serial.printf("[LASTFM] HTTP GET failed: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
-    http.end();
   }
 
   isNetworkBusy = false;
