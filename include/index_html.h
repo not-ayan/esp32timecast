@@ -1345,7 +1345,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
               <label for="password">Password</label>
               <div>
-                <input type="password" id="password" name="password" required />
+                <input type="password" id="password" name="password" />
                 <label class="small">
                   <input
                     type="checkbox"
@@ -1354,6 +1354,85 @@ const char index_html[] PROGMEM = R"rawliteral(
                   />
                   Show password
                 </label>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <h2>Network Proxy (HTTP Proxy)</h2>
+                <p class="panel-copy">Route internet traffic through an HTTP proxy if your network requires it.</p>
+              </div>
+
+              <div class="toggle-padding">
+                <label class="toggle-row-lg">
+                  <span class="label-text">Use HTTP Proxy</span>
+                  <span class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="proxyEnabled"
+                      name="proxyEnabled"
+                      onchange="toggleProxyFields(this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div id="proxyFieldsContainer" style="margin-top: 1rem; display: none;">
+                <div class="form-row two-col">
+                  <div>
+                    <label for="proxyServer">Proxy Server IP / Host</label>
+                    <input
+                      type="text"
+                      id="proxyServer"
+                      name="proxyServer"
+                      placeholder="e.g. 192.168.3.10 or proxy.lan"
+                    />
+                  </div>
+                  <div>
+                    <label for="proxyPort">Proxy Port</label>
+                    <input
+                      type="number"
+                      id="proxyPort"
+                      name="proxyPort"
+                      placeholder="3128"
+                      min="1"
+                      max="65535"
+                    />
+                  </div>
+                </div>
+
+                <div class="form-row two-col" style="margin-top: 0.75rem;">
+                  <div>
+                    <label for="proxyUser">Proxy Username (Optional)</label>
+                    <input
+                      type="text"
+                      id="proxyUser"
+                      name="proxyUser"
+                      placeholder="Username"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label for="proxyPass">Proxy Password (Optional)</label>
+                    <input
+                      type="password"
+                      id="proxyPass"
+                      name="proxyPass"
+                      placeholder="Password"
+                      autocomplete="off"
+                    />
+                    <label class="small" style="margin-top: 0.35rem; display: flex; align-items: center; cursor: pointer;">
+                      <input
+                        type="checkbox"
+                        id="toggleProxyPass"
+                        style="margin-right: 0.3rem"
+                        onchange="document.getElementById('proxyPass').type = this.checked ? 'text' : 'password'"
+                      />
+                      Show password
+                    </label>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -2030,6 +2109,19 @@ window.onload = function () {
             }
             document.getElementById("ssid").value = data.ssid || "";
             document.getElementById("password").value = data.password || "";
+            var pEn = document.getElementById("proxyEnabled");
+            if (pEn) {
+              pEn.checked = (data.proxyEnabled === true || data.proxyEnabled === "true" || data.proxyEnabled === 1 || data.proxyEnabled === "1");
+              toggleProxyFields(pEn.checked);
+            }
+            var pSrv = document.getElementById("proxyServer");
+            if (pSrv) pSrv.value = data.proxyServer || "";
+            var pPrt = document.getElementById("proxyPort");
+            if (pPrt) pPrt.value = data.proxyPort || 3128;
+            var pUsr = document.getElementById("proxyUser");
+            if (pUsr) pUsr.value = data.proxyUser || "";
+            var pPwd = document.getElementById("proxyPass");
+            if (pPwd) pPwd.value = data.proxyPass || "";
             var apiInputLocal = document.getElementById("openWeatherApiKey");
             if (
               data.openWeatherApiKey &&
@@ -2315,6 +2407,26 @@ window.onload = function () {
           "colonBlinkEnabled",
           document.getElementById("colonBlinkEnabled").checked ? "on" : ""
         );
+        var pEnSubmit = document.getElementById("proxyEnabled");
+        if (pEnSubmit) {
+          formData.set("proxyEnabled", pEnSubmit.checked ? "true" : "false");
+        }
+        var pSrvSubmit = document.getElementById("proxyServer");
+        if (pSrvSubmit) {
+          formData.set("proxyServer", pSrvSubmit.value.trim());
+        }
+        var pPrtSubmit = document.getElementById("proxyPort");
+        if (pPrtSubmit) {
+          formData.set("proxyPort", pPrtSubmit.value.trim());
+        }
+        var pUsrSubmit = document.getElementById("proxyUser");
+        if (pUsrSubmit) {
+          formData.set("proxyUser", pUsrSubmit.value.trim());
+        }
+        var pPwdSubmit = document.getElementById("proxyPass");
+        if (pPwdSubmit) {
+          formData.set("proxyPass", pPwdSubmit.value);
+        }
 
         // --- Dimming ---
         var autoDimmingChecked =
@@ -2773,6 +2885,13 @@ window.onload = function () {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: "value=" + (val ? 1 : 0),
         });
+      }
+
+      function toggleProxyFields(show) {
+        var container = document.getElementById("proxyFieldsContainer");
+        if (container) {
+          container.style.display = show ? "block" : "none";
+        }
       }
 
       function setTwelveHour(val) {
